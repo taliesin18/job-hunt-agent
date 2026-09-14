@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Local Job-Hunt RAG Agent
 
 Fully local, zero-cost RAG agent over your own career data. See
@@ -310,3 +311,7 @@ the more robust choice; use docx if you need things Excel can't easily do
 - Every agent is instructed to only use the facts in your `data/` files and
   never invent achievements or metrics — but always review generated
   resume/cover letter text yourself before sending it anywhere.
+=======
+# RAG-JobHuntAI
+Fully local, zero-cost RAG agent over your own career data using local LLM Models.
+>>>>>>> 3f251b34b293a009d49a23b2d49302628534e892
