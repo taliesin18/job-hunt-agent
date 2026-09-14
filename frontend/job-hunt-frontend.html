@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Hunt Agent</title>
+<link rel="stylesheet" href="job-hunt-frontend.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="topbar glass">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="3" y1="12" x2="21" y2="12"/></svg>
+      <div>
+        <h1>Job Hunt Agent</h1>
+        <p>Local RAG assistant &middot; runs entirely on your machine</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span class="status-pill">
+        <span class="dot off" id="statusDot"></span>
+        <span id="statusText">Checking&hellip;</span>
+      </span>
+      <input class="api-url" id="apiUrlInput" value="http://localhost:8000" spellcheck="false">
+      <button class="icon-btn" id="themeToggle" onclick="toggleTheme()" title="Toggle dark/light mode"></button>
+    </div>
+  </header>
+
+  <nav class="tabs glass">
+    <button class="tab-btn active" data-tab="match" onclick="switchTab('match')">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      Match
+    </button>
+    <button class="tab-btn" data-tab="ask" onclick="switchTab('ask')">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      Ask
+    </button>
+    <button class="tab-btn" data-tab="jobs" onclick="switchTab('jobs')">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+      Job postings
+      <span class="count hidden" id="jobsCount">0</span>
+    </button>
+    <button class="tab-btn" data-tab="kb" onclick="switchTab('kb')">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg>
+      Knowledge base
+    </button>
+  </nav>
+
+  <!-- ===================== MATCH TAB ===================== -->
+  <section class="tab-panel active" id="tab-match">
+    <h2>Paste a job description</h2>
+    <p class="subtext">Paste the full posting, or a URL to it — the fetcher agent extracts the structured fields.</p>
+    <textarea id="jobInput" placeholder="Paste the full job description here, or a URL to the posting&hellip;"></textarea>
+    <div class="row-gap">
+      <button class="btn primary" id="matchBtn" onclick="findMatch()">Find match</button>
+    </div>
+    <div class="inline-msg hidden" id="matchMsg"></div>
+
+    <div id="matchSection" class="hidden">
+      <div class="panel glass">
+        <div class="job-head">
+          <div>
+            <h3 id="jobTitle"></h3>
+            <p class="company" id="jobCompany"></p>
+          </div>
+          <span class="badge" id="confidenceBadge"></span>
+        </div>
+        <div class="caution hidden" id="cautionBanner"></div>
+        <pre class="report-text" id="reportText"></pre>
+      </div>
+
+      <div class="maps-grid">
+        <div class="panel glass map-panel">
+          <h3>Skills match map</h3>
+          <p class="map-caption">Auto-extracted from the report above &middot; hover a dot for the skill name</p>
+          <div id="skillsMap"></div>
+        </div>
+        <div class="panel glass map-panel">
+          <h3>Experience match map</h3>
+          <p class="map-caption">Auto-extracted from the report above &middot; hover a dot for the role</p>
+          <div id="experienceMap"></div>
+        </div>
+      </div>
+
+      <div class="actions-grid">
+        <div class="action-card glass">
+          <h3>Tailored resume</h3>
+          <p class="desc">Revises your current resume in place for this job — same structure, tailored content.</p>
+          <button class="btn row-gap" id="resumeBtn" onclick="generateResume()" disabled>Generate resume</button>
+          <div class="inline-msg hidden" id="resumeMsg"></div>
+          <pre class="result-text hidden" id="resumeResult"></pre>
+          <div class="result-actions hidden" id="resumeActions">
+            <button class="btn small" onclick="copyResult('resumeResult', this)">Copy</button>
+          </div>
+        </div>
+        <div class="action-card glass">
+          <h3>Cover letter</h3>
+          <p class="desc">A short, specific cover letter using the same complete history.</p>
+          <button class="btn row-gap" id="coverBtn" onclick="generateCoverLetter()" disabled>Generate cover letter</button>
+          <div class="inline-msg hidden" id="coverMsg"></div>
+          <pre class="result-text hidden" id="coverResult"></pre>
+          <div class="result-actions hidden" id="coverActions">
+            <button class="btn small" onclick="copyResult('coverResult', this)">Copy</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== ASK TAB ===================== -->
+  <section class="tab-panel" id="tab-ask">
+    <h2>Ask your career data</h2>
+    <p class="subtext">
+      Answers questions from your own indexed skills/experience — handy for recruitment-page
+      screening questions ("Describe your experience with X", "Why are you a fit for Y?") that
+      you need a grounded, specific answer for on the spot. Not just simple lookups — free-form
+      questions work too.
+    </p>
+    <textarea id="askInput" class="ask-input" placeholder="Paste a screening question, or ask anything about your own history&hellip;"></textarea>
+    <div class="row-gap" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <select id="askType">
+        <option value="">All types</option>
+        <option value="skill">Skill</option>
+        <option value="experience">Experience</option>
+        <option value="education">Education</option>
+        <option value="project">Project</option>
+        <option value="certification">Certification</option>
+      </select>
+      <button class="btn primary" id="askBtn" onclick="askQuestion()">Ask</button>
+    </div>
+    <div class="inline-msg hidden" id="askMsg"></div>
+    <div class="panel glass hidden" id="askPanel">
+      <div class="result-text no-border markdown-body" id="askAnswer"></div>
+      <div class="result-actions">
+        <button class="btn small" onclick="copyAskAnswer(this)">Copy answer</button>
+        <button class="btn small" id="askContextToggle" onclick="toggleAskContext()">Show retrieved context</button>
+      </div>
+      <pre class="result-text hidden" id="askContext"></pre>
+    </div>
+  </section>
+
+  <!-- ===================== JOB POSTINGS TAB ===================== -->
+  <section class="tab-panel" id="tab-jobs">
+    <h2>Job postings pipeline</h2>
+    <p class="subtext">Jobs matched at a high enough confidence to save. Drag a card between columns to update its status, or click one to view its generated resume/cover letter.</p>
+    <button class="btn" onclick="loadJobPostings()">Refresh</button>
+    <div class="inline-msg hidden" id="jobsMsg"></div>
+    <div class="kanban-board" id="kanbanBoard"></div>
+  </section>
+
+  <!-- ===================== KNOWLEDGE BASE TAB ===================== -->
+  <section class="tab-panel" id="tab-kb">
+    <h2>Knowledge base</h2>
+    <p class="subtext">What's currently indexed for the Ask tab. Match/resume/cover-letter read your data files directly and don't need this.</p>
+    <div class="stat-grid" id="statGrid"></div>
+    <div class="row-gap">
+      <button class="btn primary" id="ingestBtn" onclick="runIngest()">Re-index now</button>
+    </div>
+    <div class="inline-msg hidden" id="kbMsg"></div>
+  </section>
+
+  <div class="setup-note glass">
+    This page calls a local API on your machine — start it first: <code>uvicorn src.api:app --reload --port 8000</code>.
+    If you're viewing this inside Claude's preview rather than your own browser, download the file and open it
+    directly — Claude's sandbox can't reach your local network. Local generation can take a while depending on
+    your hardware; buttons stay disabled with a status message while a request is in flight. The skills/experience
+    match maps are a best-effort extraction from the report's prose — they may miss or miscategorize an item;
+    the report text above them is always the source of truth.
+  </div>
+
+</div>
+
+<div class="modal-backdrop hidden" id="jobModalBackdrop" onclick="closeJobModalIfBackdrop(event)">
+  <div class="modal glass">
+    <div class="modal-header">
+      <div>
+        <h3 id="modalJobTitle"></h3>
+        <p class="company" id="modalJobCompany"></p>
+      </div>
+      <button class="icon-btn" onclick="closeJobModal()" title="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label class="modal-field-label" for="modalStatusSelect">Status</label>
+      <select id="modalStatusSelect" onchange="onModalStatusChange()"></select>
+
+      <div class="modal-section">
+        <h4>Tailored resume</h4>
+        <pre class="result-text no-border" id="modalResumeText"></pre>
+        <div class="result-actions hidden" id="modalResumeActions">
+          <button class="btn small" onclick="copyResult('modalResumeText', this)">Copy</button>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <h4>Cover letter</h4>
+        <pre class="result-text no-border" id="modalCoverText"></pre>
+        <div class="result-actions hidden" id="modalCoverActions">
+          <button class="btn small" onclick="copyResult('modalCoverText', this)">Copy</button>
+        </div>
+      </div>
+
+      <div class="row-gap">
+        <button class="btn primary" onclick="goToMatchTabForModalJob()">Re-match / regenerate in Match tab</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="job-hunt-frontend.js"></script>
+</body>
+</html>

@@ -1,0 +1,753 @@
+/* ---------------- theme ---------------- */
+const SUN_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
+const MOON_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  document.getElementById('themeToggle').innerHTML = theme === 'dark' ? SUN_ICON : MOON_ICON;
+}
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme');
+  applyTheme(current === 'dark' ? 'light' : 'dark');
+}
+applyTheme(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+
+/* ---------------- tabs ---------------- */
+function switchTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.querySelector(`.tab-btn[data-tab="${name}"]`).classList.add('active');
+  if (name === 'jobs') loadJobPostings();
+  if (name === 'kb') loadStatus();
+}
+
+/* ---------------- shared helpers ---------------- */
+let apiBase = document.getElementById('apiUrlInput').value.replace(/\/$/, '');
+let currentJob = null;
+let currentMatchReport = '';
+let currentJobSaved = false; // whether currentJob exists in data/job_postings/ — decided by match confidence
+
+document.getElementById('apiUrlInput').addEventListener('change', (e) => {
+  apiBase = e.target.value.replace(/\/$/, '');
+  checkHealth();
+});
+
+function setMsg(id, text, kind) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = 'inline-msg' + (kind ? ' ' + kind : '');
+  el.classList.toggle('hidden', !text);
+}
+
+function friendlyError(e) {
+  const msg = String(e && e.message || e);
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('Load failed')) {
+    return `Couldn't reach the API at ${apiBase}. Make sure it's running (uvicorn src.api:app --reload --port 8000) and try again.`;
+  }
+  return msg;
+}
+
+async function safeJson(res) {
+  try { return await res.json(); } catch { return null; }
+}
+
+async function apiFetch(path, options) {
+  const res = await fetch(apiBase + path, options);
+  if (!res.ok) {
+    const err = await safeJson(res);
+    throw new Error(err && err.detail ? err.detail : `Request failed (${res.status})`);
+  }
+  return res.json();
+}
+
+async function checkHealth() {
+  const dot = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  try {
+    await apiFetch('/api/health');
+    dot.className = 'dot on';
+    text.textContent = 'Connected';
+  } catch {
+    dot.className = 'dot off';
+    text.textContent = 'Not connected';
+  }
+}
+checkHealth();
+setInterval(checkHealth, 10000);
+
+/* ---------------- Match tab ---------------- */
+async function findMatch() {
+  const source = document.getElementById('jobInput').value.trim();
+  if (!source) {
+    setMsg('matchMsg', 'Paste a job description or URL first.', 'error');
+    return;
+  }
+  const btn = document.getElementById('matchBtn');
+  btn.disabled = true;
+  btn.textContent = 'Finding match…';
+  setMsg('matchMsg', 'Looking for a match — this can take a little while on local hardware…', 'loading');
+
+  try {
+    const data = await apiFetch('/api/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job_source: source }),
+    });
+    currentJob = data.job;
+    currentMatchReport = data.match_report;
+    renderMatch(data);
+    setMsg('matchMsg', '', null);
+  } catch (e) {
+    setMsg('matchMsg', friendlyError(e), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Find match';
+  }
+}
+
+async function matchSavedJob(job) {
+  switchTab('match');
+  document.getElementById('jobInput').value = job.raw_description || '';
+  const btn = document.getElementById('matchBtn');
+  btn.disabled = true;
+  btn.textContent = 'Finding match…';
+  setMsg('matchMsg', 'Re-matching this saved posting…', 'loading');
+  try {
+    const data = await apiFetch('/api/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job }),
+    });
+    currentJob = data.job;
+    currentMatchReport = data.match_report;
+    renderMatch(data);
+    setMsg('matchMsg', '', null);
+  } catch (e) {
+    setMsg('matchMsg', friendlyError(e), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Find match';
+  }
+}
+
+function renderMatch(data) {
+  document.getElementById('matchSection').classList.remove('hidden');
+  document.getElementById('jobTitle').textContent = data.job.title || 'Untitled role';
+  document.getElementById('jobCompany').textContent = data.job.company || 'Unknown company';
+  document.getElementById('reportText').textContent = data.match_report;
+  currentJobSaved = !!data.saved;
+
+  const badge = document.getElementById('confidenceBadge');
+  const c = data.confidence;
+  badge.textContent = `Match confidence: ${c}/100`;
+  badge.className = 'badge ' + (c >= 70 ? 'good' : c >= 50 ? 'mid' : 'low');
+
+  const banner = document.getElementById('cautionBanner');
+  if (data.below_threshold) {
+    banner.textContent = `Confidence is below the usual threshold (${data.confidence_threshold}/100), so this job wasn't saved to your Job Postings board. You can still generate a resume or cover letter below for a second opinion, but it won't be attached to a saved posting.`;
+    banner.classList.remove('hidden');
+  } else {
+    banner.classList.add('hidden');
+  }
+
+  document.getElementById('resumeBtn').disabled = false;
+  document.getElementById('coverBtn').disabled = false;
+  ['resumeResult','coverResult'].forEach(id => document.getElementById(id).classList.add('hidden'));
+  ['resumeActions','coverActions'].forEach(id => document.getElementById(id).classList.add('hidden'));
+
+  buildMatchMaps(data.match_report).catch(() => {
+    document.getElementById('skillsMap').innerHTML = '<p class="map-caption">Could not build the map.</p>';
+    document.getElementById('experienceMap').innerHTML = '<p class="map-caption">Could not build the map.</p>';
+  });
+}
+
+async function generateResume() {
+  await generateArtifact({
+    endpoint: '/api/resume', btnId: 'resumeBtn', msgId: 'resumeMsg',
+    resultId: 'resumeResult', actionsId: 'resumeActions',
+    loadingLabel: 'Generating resume…', idleLabel: 'Generate resume', responseKey: 'resume',
+    patchField: 'resume_text',
+  });
+}
+
+async function generateCoverLetter() {
+  await generateArtifact({
+    endpoint: '/api/cover-letter', btnId: 'coverBtn', msgId: 'coverMsg',
+    resultId: 'coverResult', actionsId: 'coverActions',
+    loadingLabel: 'Generating cover letter…', idleLabel: 'Generate cover letter', responseKey: 'cover_letter',
+    patchField: 'cover_letter_text',
+  });
+}
+
+async function generateArtifact(cfg) {
+  if (!currentJob) return;
+  const btn = document.getElementById(cfg.btnId);
+  btn.disabled = true;
+  btn.textContent = cfg.loadingLabel;
+  setMsg(cfg.msgId, 'This can take a while on local hardware — please wait…', 'loading');
+  document.getElementById(cfg.resultId).classList.add('hidden');
+  document.getElementById(cfg.actionsId).classList.add('hidden');
+
+  try {
+    const data = await apiFetch(cfg.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job: currentJob, match_report: currentMatchReport }),
+    });
+    const resultEl = document.getElementById(cfg.resultId);
+    resultEl.textContent = data[cfg.responseKey];
+    resultEl.classList.remove('hidden');
+    document.getElementById(cfg.actionsId).classList.remove('hidden');
+    setMsg(cfg.msgId, '', null);
+
+    // Persist onto the saved job posting so its Kanban card's detail view
+    // shows this later. Skipped entirely for a match that wasn't saved
+    // (below confidence threshold) — there's no posting record to attach it to.
+    if (currentJobSaved && currentJob && currentJob.id) {
+      try {
+        await apiFetch(`/api/job-postings/${encodeURIComponent(currentJob.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [cfg.patchField]: data[cfg.responseKey] }),
+        });
+      } catch {
+        // Non-fatal: the result is still shown above; it just won't be
+        // saved onto the Kanban card. Don't block the UI on this.
+      }
+    }
+  } catch (e) {
+    setMsg(cfg.msgId, friendlyError(e), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = cfg.idleLabel;
+  }
+}
+
+function copyResult(id, btn) {
+  const text = document.getElementById(id).textContent;
+  const original = btn.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  }).catch(() => {
+    btn.textContent = 'Select text to copy';
+    setTimeout(() => { btn.textContent = original; }, 2000);
+  });
+}
+
+/* ---------------- Match maps (skills / experience scatter charts) ---------------- */
+let profileDataCache = null;
+
+async function ensureProfileData() {
+  if (!profileDataCache) {
+    profileDataCache = await apiFetch('/api/profile-data');
+  }
+  return profileDataCache;
+}
+
+function splitReportSections(report) {
+  const headerRe = /(strong matches|partial matches|gaps)\s*:?\s*/gi;
+  const found = [...report.matchAll(headerRe)];
+  const sections = { strong: '', partial: '', gap: '' };
+  for (let i = 0; i < found.length; i++) {
+    const label = found[i][1].toLowerCase();
+    const start = found[i].index + found[i][0].length;
+    const end = i + 1 < found.length ? found[i + 1].index : report.length;
+    const text = report.slice(start, end).trim();
+    if (label.startsWith('strong')) sections.strong = text;
+    else if (label.startsWith('partial')) sections.partial = text;
+    else if (label.startsWith('gap')) sections.gap = text;
+  }
+  return sections;
+}
+
+function extractItems(sectionText) {
+  if (!sectionText) return [];
+  const lines = sectionText.split(/\n+/).map(l => l.trim()).filter(Boolean);
+  const bulletLines = lines.filter(l => /^[-*•]|^\d+[.)]/.test(l));
+  let raw;
+  if (bulletLines.length >= 1) {
+    raw = bulletLines.map(l => l.replace(/^[-*•]\s*|^\d+[.)]\s*/, ''));
+  } else {
+    raw = sectionText.split(/[,;]|\.\s+(?=[A-Z])/).map(s => s.trim());
+  }
+  return raw.map(s => s.replace(/\.$/, '')).filter(s => s.length >= 3 && s.length <= 140);
+}
+
+function nameAliases(name) {
+  const aliases = [name];
+  const m = /\(([^)]+)\)/.exec(name);
+  if (m) aliases.push(m[1]);
+  const base = name.replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim();
+  if (base && base !== name) aliases.push(base);
+  return aliases;
+}
+
+function containsPhrase(haystack, needle) {
+  if (needle.length < 3) return false;
+  const esc = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  try { return new RegExp('\\b' + esc + '\\b', 'i').test(haystack); }
+  catch { return haystack.toLowerCase().includes(needle.toLowerCase()); }
+}
+
+function classifyItem(itemText, profile) {
+  for (const s of profile.skills) {
+    for (const alias of nameAliases(s.name)) {
+      if (containsPhrase(itemText, alias)) return { type: 'skill', label: s.name };
+    }
+  }
+  for (const e of profile.experience) {
+    if (containsPhrase(itemText, e.company)) return { type: 'experience', label: `${e.title} — ${e.company}` };
+    for (const alias of nameAliases(e.title)) {
+      if (alias.length > 4 && containsPhrase(itemText, alias)) return { type: 'experience', label: `${e.title} — ${e.company}` };
+    }
+  }
+  return { type: 'unclassified', label: itemText };
+}
+
+async function buildMatchMaps(report) {
+  const profile = await ensureProfileData();
+  const sections = splitReportSections(report);
+  const buckets = { skill: { strong: [], partial: [], gap: [] }, experience: { strong: [], partial: [], gap: [] } };
+
+  ['strong', 'partial', 'gap'].forEach((sectionKey) => {
+    extractItems(sections[sectionKey]).forEach((item) => {
+      const { type, label } = classifyItem(item, profile);
+      if (type === 'skill') buckets.skill[sectionKey].push(label);
+      else if (type === 'experience') buckets.experience[sectionKey].push(label);
+    });
+  });
+
+  renderScatterChart('skillsMap', buckets.skill);
+  renderScatterChart('experienceMap', buckets.experience);
+}
+
+function escapeXml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderScatterChart(containerId, itemsBySection) {
+  const width = 420, height = 190, bandWidth = width / 3;
+  const columns = [
+    { key: 'strong', label: 'Strong', color: '#16a34a', x0: 0 },
+    { key: 'partial', label: 'Partial', color: '#d97706', x0: bandWidth },
+    { key: 'gap', label: 'Gaps', color: '#dc2626', x0: bandWidth * 2 },
+  ];
+  let total = 0;
+  let svg = `<svg viewBox="0 0 ${width} ${height + 26}" role="img" aria-label="Match map scatter chart">`;
+  columns.forEach((col) => {
+    const items = itemsBySection[col.key] || [];
+    total += items.length;
+    const cx = col.x0 + bandWidth / 2;
+    if (col.x0 > 0) svg += `<line x1="${col.x0}" y1="0" x2="${col.x0}" y2="${height}" stroke="currentColor" stroke-opacity="0.12"/>`;
+    svg += `<text x="${cx}" y="${height + 18}" text-anchor="middle" font-size="11" fill="currentColor" fill-opacity="0.55">${col.label} (${items.length})</text>`;
+    const n = items.length;
+    items.forEach((label, i) => {
+      const ySpacing = height / (n + 1);
+      const jitterX = (pseudoRandom(label + i) - 0.5) * (bandWidth * 0.55);
+      const jitterY = (pseudoRandom(i + label) - 0.5) * (ySpacing * 0.4);
+      const x = cx + jitterX;
+      const y = ySpacing * (i + 1) + jitterY;
+      svg += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="6.5" fill="${col.color}" fill-opacity="0.82" stroke="${col.color}" stroke-width="1.2"><title>${escapeXml(label)}</title></circle>`;
+    });
+  });
+  svg += `</svg>`;
+  const container = document.getElementById(containerId);
+  if (total === 0) {
+    container.innerHTML = '<p class="map-caption">No clearly categorized items found in the report for this map.</p>';
+  } else {
+    container.innerHTML = svg;
+  }
+}
+
+// Deterministic pseudo-random in [0,1) from a string seed, so re-rendering
+// the same match doesn't jitter the dots to a new position each time.
+function pseudoRandom(seed) {
+  let h = 0;
+  const s = String(seed);
+  for (let i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) >>> 0; }
+  return (h % 1000) / 1000;
+}
+
+/* ---------------- Ask tab ---------------- */
+let lastAskContext = '';
+let lastAskAnswerRaw = '';
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function inlineFormat(s) {
+  s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/`([^`]+?)`/g, '<code>$1</code>');
+  s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  s = s.replace(/_(.+?)_/g, '<em>$1</em>');
+  return s;
+}
+
+function renderBlockLines(lines) {
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (/^[-*•]\s+/.test(lines[i])) {
+      const items = [];
+      while (i < lines.length && /^[-*•]\s+/.test(lines[i])) {
+        items.push(`<li>${inlineFormat(lines[i].replace(/^[-*•]\s+/, ''))}</li>`);
+        i++;
+      }
+      out.push('<ul>' + items.join('') + '</ul>');
+    } else if (/^\d+[.)]\s+/.test(lines[i])) {
+      const items = [];
+      while (i < lines.length && /^\d+[.)]\s+/.test(lines[i])) {
+        items.push(`<li>${inlineFormat(lines[i].replace(/^\d+[.)]\s+/, ''))}</li>`);
+        i++;
+      }
+      out.push('<ol>' + items.join('') + '</ol>');
+    } else {
+      const paraLines = [];
+      while (i < lines.length && !/^[-*•]\s+/.test(lines[i]) && !/^\d+[.)]\s+/.test(lines[i])) {
+        paraLines.push(lines[i]);
+        i++;
+      }
+      out.push(`<p>${paraLines.map(inlineFormat).join('<br>')}</p>`);
+    }
+  }
+  return out.join('');
+}
+
+// Minimal, safe markdown -> HTML: paragraphs, single-newline line breaks,
+// bold/italic/code, and bullet/numbered lists — including a lead-in line
+// immediately followed by list items with no blank line between them
+// (a common real-world LLM output pattern). Escapes HTML first so any
+// literal <, >, & in the answer can't break the page or inject markup.
+function markdownToHtml(text) {
+  const blocks = escapeHtml(text).trim().split(/\n\s*\n/);
+  return blocks.map((block) => {
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+    return lines.length ? renderBlockLines(lines) : '';
+  }).join('');
+}
+
+async function askQuestion() {
+  const query = document.getElementById('askInput').value.trim();
+  if (!query) {
+    setMsg('askMsg', 'Type or paste a question first.', 'error');
+    return;
+  }
+  const entityType = document.getElementById('askType').value || null;
+  const btn = document.getElementById('askBtn');
+  btn.disabled = true;
+  btn.textContent = 'Asking…';
+  setMsg('askMsg', 'Retrieving and answering — please wait…', 'loading');
+  document.getElementById('askPanel').classList.add('hidden');
+  document.getElementById('askContext').classList.add('hidden');
+
+  try {
+    const data = await apiFetch('/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, entity_type: entityType }),
+    });
+    document.getElementById('askAnswer').innerHTML = markdownToHtml(data.answer);
+    lastAskAnswerRaw = data.answer;
+    lastAskContext = data.context || '';
+    document.getElementById('askPanel').classList.remove('hidden');
+    document.getElementById('askContextToggle').textContent = 'Show retrieved context';
+    setMsg('askMsg', '', null);
+  } catch (e) {
+    setMsg('askMsg', friendlyError(e), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Ask';
+  }
+}
+
+function copyAskAnswer(btn) {
+  const original = btn.textContent;
+  navigator.clipboard.writeText(lastAskAnswerRaw).then(() => {
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  }).catch(() => {
+    btn.textContent = 'Select text to copy';
+    setTimeout(() => { btn.textContent = original; }, 2000);
+  });
+}
+
+function toggleAskContext() {
+  const el = document.getElementById('askContext');
+  const btn = document.getElementById('askContextToggle');
+  const showing = !el.classList.contains('hidden');
+  if (showing) {
+    el.classList.add('hidden');
+    btn.textContent = 'Show retrieved context';
+  } else {
+    el.textContent = lastAskContext;
+    el.classList.remove('hidden');
+    btn.textContent = 'Hide retrieved context';
+  }
+}
+
+/* ---------------- Job postings tab (Kanban board) ---------------- */
+const KANBAN_STATUSES = [
+  { key: 'saved', label: 'Saved' },
+  { key: 'application_sent', label: 'Application Sent / Waiting' },
+  { key: 'initial_interview', label: 'Initial Interview' },
+  { key: 'rejected', label: 'Rejected' },
+  { key: 'failed', label: 'Failed' },
+];
+const KANBAN_STATUS_KEYS = KANBAN_STATUSES.map(s => s.key);
+
+let jobPostingsCache = [];
+let currentModalJobId = null;
+
+function normalizeStatus(status) {
+  return KANBAN_STATUS_KEYS.includes(status) ? status : 'saved';
+}
+
+async function loadJobPostings() {
+  setMsg('jobsMsg', 'Loading…', 'loading');
+  try {
+    const data = await apiFetch('/api/job-postings');
+    jobPostingsCache = data.postings || [];
+    renderKanbanBoard(jobPostingsCache);
+    setMsg('jobsMsg', '', null);
+  } catch (e) {
+    setMsg('jobsMsg', friendlyError(e), 'error');
+  }
+}
+
+function elFromHtml(html) {
+  const t = document.createElement('template');
+  t.innerHTML = html.trim();
+  return t.content.firstChild;
+}
+
+function renderKanbanBoard(postings) {
+  const board = document.getElementById('kanbanBoard');
+  board.innerHTML = '';
+
+  const countEl = document.getElementById('jobsCount');
+  countEl.textContent = String(postings.length);
+  countEl.classList.toggle('hidden', postings.length === 0);
+
+  if (postings.length === 0) {
+    board.appendChild(elFromHtml('<div class="empty-state">No saved job postings yet — a match needs to score high enough confidence to be saved here. Run one from the Match tab.</div>'));
+    return;
+  }
+
+  KANBAN_STATUSES.forEach(({ key, label }) => {
+    const columnPostings = postings.filter(j => normalizeStatus(j.status) === key);
+
+    const column = document.createElement('div');
+    column.className = 'kanban-column glass';
+    column.dataset.status = key;
+    column.addEventListener('dragover', onColumnDragOver);
+    column.addEventListener('dragleave', onColumnDragLeave);
+    column.addEventListener('drop', onColumnDrop);
+
+    const header = document.createElement('div');
+    header.className = 'kanban-column-header';
+    header.innerHTML = '<span></span><span class="count"></span>';
+    header.querySelector('span').textContent = label;
+    header.querySelector('.count').textContent = String(columnPostings.length);
+    column.appendChild(header);
+
+    const cardsWrap = document.createElement('div');
+    cardsWrap.className = 'kanban-cards';
+    if (columnPostings.length === 0) {
+      cardsWrap.appendChild(elFromHtml('<div class="kanban-empty">No jobs here</div>'));
+    } else {
+      columnPostings.forEach(job => cardsWrap.appendChild(buildKanbanCard(job)));
+    }
+    column.appendChild(cardsWrap);
+
+    board.appendChild(column);
+  });
+}
+
+function buildKanbanCard(job) {
+  const card = document.createElement('div');
+  card.className = 'kanban-card';
+  card.draggable = true;
+  card.dataset.jobId = job.id;
+
+  const conf = job.last_match_confidence;
+  const confClass = conf == null ? '' : (conf >= 70 ? 'good' : conf >= 50 ? 'mid' : 'low');
+
+  card.innerHTML = `
+    <div class="title"></div>
+    <div class="company"></div>
+    <div class="meta-row">
+      <span class="date"></span>
+      <span class="badge conf-badge"></span>
+    </div>
+  `;
+  card.querySelector('.title').textContent = job.title || 'Untitled role';
+  card.querySelector('.company').textContent = job.company || 'Unknown company';
+  card.querySelector('.date').textContent = job.date_saved || '';
+  const badge = card.querySelector('.conf-badge');
+  if (conf == null) {
+    badge.remove();
+  } else {
+    badge.textContent = `${conf}/100`;
+    badge.classList.add(confClass);
+  }
+
+  card.addEventListener('dragstart', (e) => {
+    card.classList.add('dragging');
+    e.dataTransfer.setData('text/plain', job.id);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  card.addEventListener('click', () => openJobModal(job.id));
+
+  return card;
+}
+
+function onColumnDragOver(e) {
+  e.preventDefault();
+  e.currentTarget.classList.add('drag-over');
+}
+function onColumnDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+async function onColumnDrop(e) {
+  e.preventDefault();
+  const column = e.currentTarget;
+  column.classList.remove('drag-over');
+  const jobId = e.dataTransfer.getData('text/plain');
+  const newStatus = column.dataset.status;
+  const job = jobPostingsCache.find(j => j.id === jobId);
+  if (!job || normalizeStatus(job.status) === newStatus) return;
+
+  const previousStatus = job.status;
+  job.status = newStatus; // optimistic UI update
+  renderKanbanBoard(jobPostingsCache);
+
+  try {
+    await apiFetch(`/api/job-postings/${encodeURIComponent(jobId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus }),
+    });
+  } catch (err) {
+    job.status = previousStatus; // roll back on failure
+    renderKanbanBoard(jobPostingsCache);
+    setMsg('jobsMsg', friendlyError(err), 'error');
+  }
+}
+
+function openJobModal(jobId) {
+  const job = jobPostingsCache.find(j => j.id === jobId);
+  if (!job) return;
+  currentModalJobId = jobId;
+
+  document.getElementById('modalJobTitle').textContent = job.title || 'Untitled role';
+  document.getElementById('modalJobCompany').textContent = job.company || 'Unknown company';
+
+  const select = document.getElementById('modalStatusSelect');
+  select.innerHTML = KANBAN_STATUSES.map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+  select.value = normalizeStatus(job.status);
+
+  fillModalTextField('modalResumeText', 'modalResumeActions', job.resume_text);
+  fillModalTextField('modalCoverText', 'modalCoverActions', job.cover_letter_text);
+
+  document.getElementById('jobModalBackdrop').classList.remove('hidden');
+}
+
+function fillModalTextField(textId, actionsId, value) {
+  const el = document.getElementById(textId);
+  const actions = document.getElementById(actionsId);
+  if (value) {
+    el.textContent = value;
+    actions.classList.remove('hidden');
+  } else {
+    el.textContent = 'Not generated yet for this job.';
+    actions.classList.add('hidden');
+  }
+}
+
+function closeJobModal() {
+  document.getElementById('jobModalBackdrop').classList.add('hidden');
+  currentModalJobId = null;
+}
+
+function closeJobModalIfBackdrop(e) {
+  if (e.target.id === 'jobModalBackdrop') closeJobModal();
+}
+
+async function onModalStatusChange() {
+  if (!currentModalJobId) return;
+  const newStatus = document.getElementById('modalStatusSelect').value;
+  const job = jobPostingsCache.find(j => j.id === currentModalJobId);
+  const previousStatus = job ? job.status : null;
+  if (job) job.status = newStatus;
+
+  try {
+    await apiFetch(`/api/job-postings/${encodeURIComponent(currentModalJobId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus }),
+    });
+    renderKanbanBoard(jobPostingsCache);
+  } catch (e) {
+    if (job) job.status = previousStatus;
+    document.getElementById('modalStatusSelect').value = normalizeStatus(previousStatus);
+    setMsg('jobsMsg', friendlyError(e), 'error');
+  }
+}
+
+function goToMatchTabForModalJob() {
+  const job = jobPostingsCache.find(j => j.id === currentModalJobId);
+  closeJobModal();
+  if (job) matchSavedJob(job);
+}
+
+/* ---------------- Knowledge base tab ---------------- */
+async function loadStatus() {
+  setMsg('kbMsg', 'Loading…', 'loading');
+  try {
+    const data = await apiFetch('/api/status');
+    renderStats(data.indexed || {});
+    setMsg('kbMsg', '', null);
+  } catch (e) {
+    setMsg('kbMsg', friendlyError(e), 'error');
+  }
+}
+
+function renderStats(indexed) {
+  const grid = document.getElementById('statGrid');
+  grid.innerHTML = '';
+  const entries = Object.entries(indexed);
+  if (entries.length === 0) {
+    grid.appendChild(elFromHtml('<div class="empty-state">Nothing indexed yet — click "Re-index now" below.</div>'));
+    return;
+  }
+  entries.forEach(([type, count]) => {
+    const card = document.createElement('div');
+    card.className = 'stat-card glass';
+    card.innerHTML = `<div class="num"></div><div class="label"></div>`;
+    card.querySelector('.num').textContent = count;
+    card.querySelector('.label').textContent = type.replace(/_/g, ' ') + (count === 1 ? '' : 's');
+    grid.appendChild(card);
+  });
+}
+
+async function runIngest() {
+  const btn = document.getElementById('ingestBtn');
+  btn.disabled = true;
+  btn.textContent = 'Re-indexing…';
+  setMsg('kbMsg', "This only affects the Ask tab — match/resume/cover-letter don't need it. Please wait…", 'loading');
+  try {
+    const data = await apiFetch('/api/ingest', { method: 'POST' });
+    renderStats(data.indexed || {});
+    const s = data.stats || {};
+    setMsg('kbMsg', `Done — added ${s.added||0}, updated ${s.updated||0}, unchanged ${s.unchanged||0}, deleted ${s.deleted||0}.`, null);
+  } catch (e) {
+    setMsg('kbMsg', friendlyError(e), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Re-index now';
+  }
+}
