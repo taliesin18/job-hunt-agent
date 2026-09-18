@@ -81,12 +81,12 @@
       <div class="maps-grid">
         <div class="panel glass map-panel">
           <h3>Skills match map</h3>
-          <p class="map-caption">Auto-extracted from the report above &middot; hover a dot for the skill name</p>
+          <p class="map-caption">Profile skills named in the report &middot; hover a dot for the skill name</p>
           <div id="skillsMap"></div>
         </div>
         <div class="panel glass map-panel">
           <h3>Experience match map</h3>
-          <p class="map-caption">Auto-extracted from the report above &middot; hover a dot for the role</p>
+          <p class="map-caption">Roles linked to matched skills or named in the report &middot; hover a dot for the role</p>
           <div id="experienceMap"></div>
         </div>
       </div>
@@ -175,7 +175,8 @@
     If you're viewing this inside Claude's preview rather than your own browser, download the file and open it
     directly — Claude's sandbox can't reach your local network. Local generation can take a while depending on
     your hardware; buttons stay disabled with a status message while a request is in flight. The skills/experience
-    match maps are a best-effort extraction from the report's prose — they may miss or miscategorize an item;
+    match maps normalize the model's strong/moderate/weak headings and use your profile's skill-to-experience links;
+    a role with no linked profile data may still leave an experience map empty;
     the report text above them is always the source of truth.
   </div>
 

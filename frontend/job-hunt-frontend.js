@@ -79,6 +79,9 @@ function friendlyError(e) {
   if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('Load failed')) {
     return `Couldn't reach the API at ${apiBase}. Make sure it's running (uvicorn src.api:app --reload --port 8000) and try again.`;
   }
+  if (msg.includes('Request failed (504)')) {
+    return 'The local model took longer than the web proxy allowed. Restart the Job Hunt Agent so its updated longer timeout is applied, then try again.';
+  }
   return msg;
 }
 
@@ -130,7 +133,7 @@ async function findMatch() {
     const data = await apiFetch('/api/match', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ job_source: source }),
+      body: JSON.stringify(matchRequestForSource(source)),
     });
     currentJob = data.job;
     currentMatchReport = data.match_report;
@@ -142,6 +145,29 @@ async function findMatch() {
     btn.disabled = false;
     btn.textContent = 'Find match';
   }
+}
+
+function matchRequestForSource(source) {
+  // The Edge companion extension copies a complete JobPosting JSON object.
+  // Detect only the required shape; all other pasted content stays on the
+  // existing raw-text/URL path and is parsed by the local LLM as before.
+  try {
+    const job = JSON.parse(source);
+    if (
+      job &&
+      typeof job === 'object' &&
+      typeof job.id === 'string' && job.id.trim() &&
+      typeof job.company === 'string' &&
+      typeof job.title === 'string' &&
+      typeof job.raw_description === 'string' && job.raw_description.trim() &&
+      Array.isArray(job.required_skills)
+    ) {
+      return { job, save_job: true };
+    }
+  } catch {
+    // Normal pasted descriptions are not JSON; use the original path below.
+  }
+  return { job_source: source };
 }
 
 async function matchSavedJob(job) {
@@ -191,11 +217,15 @@ function renderMatch(data) {
 
   const badge = document.getElementById('confidenceBadge');
   const c = data.confidence;
-  badge.textContent = `Match confidence: ${c}/100`;
-  badge.className = 'badge ' + (c >= 70 ? 'good' : c >= 50 ? 'mid' : 'low');
+  const hasConfidence = Number.isInteger(c) && data.confidence_detected;
+  badge.textContent = hasConfidence ? `Match confidence: ${c}/100` : 'Match confidence: unavailable';
+  badge.className = 'badge ' + (hasConfidence && c >= 70 ? 'good' : hasConfidence && c >= 50 ? 'mid' : 'low');
 
   const banner = document.getElementById('cautionBanner');
-  if (data.below_threshold) {
+  if (!hasConfidence) {
+    banner.textContent = 'The model did not return a valid confidence score, so this posting was not saved or prioritized. Re-run the match to get a scored result.';
+    banner.classList.remove('hidden');
+  } else if (data.below_threshold) {
     banner.textContent = `Confidence is below the usual threshold (${data.confidence_threshold}/100), so this job wasn't saved to your Job Postings board. You can still generate a resume or cover letter below for a second opinion, but it won't be attached to a saved posting.`;
     banner.classList.remove('hidden');
   } else {
@@ -298,7 +328,10 @@ async function ensureProfileData() {
 }
 
 function splitReportSections(report) {
-  const headerRe = /(strong matches|partial matches|gaps)\s*:?\s*/gi;
+  // Models sometimes use "Moderate", "Weak", or "No matches" despite the
+  // requested wording. Treat those equivalent headings consistently instead
+  // of putting the entire report into the first category.
+  const headerRe = /(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*\*)?\s*(strong|moderate|partial|weak|no|gaps?)(?:\s+(?:or\s+no\s+)?matches?)?\s*(?:\*\*)?\s*:?\s*/gim;
   const found = [...report.matchAll(headerRe)];
   const sections = { strong: '', partial: '', gap: '' };
   for (let i = 0; i < found.length; i++) {
@@ -306,9 +339,10 @@ function splitReportSections(report) {
     const start = found[i].index + found[i][0].length;
     const end = i + 1 < found.length ? found[i + 1].index : report.length;
     const text = report.slice(start, end).trim();
-    if (label.startsWith('strong')) sections.strong = text;
-    else if (label.startsWith('partial')) sections.partial = text;
-    else if (label.startsWith('gap')) sections.gap = text;
+    const sectionKey = label === 'strong' ? 'strong'
+      : (label === 'moderate' || label === 'partial') ? 'partial'
+      : 'gap';
+    sections[sectionKey] += (sections[sectionKey] ? '\n' : '') + text;
   }
   return sections;
 }
@@ -342,19 +376,45 @@ function containsPhrase(haystack, needle) {
   catch { return haystack.toLowerCase().includes(needle.toLowerCase()); }
 }
 
+function itemLabel(itemText) {
+  const boldLabel = /^\*\*([^*]+)\*\*/.exec(itemText);
+  if (boldLabel) return boldLabel[1].trim();
+  return itemText.split(/\s*:\s*/, 1)[0].replace(/^[*_`\s]+|[*_`\s]+$/g, '').trim();
+}
+
+function uniquePush(items, label) {
+  if (label && !items.includes(label)) items.push(label);
+}
+
 function classifyItem(itemText, profile) {
+  const skills = [];
+  const experienceById = new Map(profile.experience.map(e => [e.id, e]));
+  const experiences = new Map();
   for (const s of profile.skills) {
     for (const alias of nameAliases(s.name)) {
-      if (containsPhrase(itemText, alias)) return { type: 'skill', label: s.name };
+      if (containsPhrase(itemText, alias)) {
+        skills.push(s);
+        for (const experienceId of s.related_experience_ids || []) {
+          const experience = experienceById.get(experienceId);
+          if (experience) experiences.set(experience.id, experience);
+        }
+        break;
+      }
     }
   }
   for (const e of profile.experience) {
-    if (containsPhrase(itemText, e.company)) return { type: 'experience', label: `${e.title} — ${e.company}` };
+    if (containsPhrase(itemText, e.company)) experiences.set(e.id, e);
     for (const alias of nameAliases(e.title)) {
-      if (alias.length > 4 && containsPhrase(itemText, alias)) return { type: 'experience', label: `${e.title} — ${e.company}` };
+      if (alias.length > 4 && containsPhrase(itemText, alias)) experiences.set(e.id, e);
+    }
+    for (const term of [...(e.skills_used || []), ...(e.tags || [])]) {
+      if (containsPhrase(itemText, term)) {
+        experiences.set(e.id, e);
+        break;
+      }
     }
   }
-  return { type: 'unclassified', label: itemText };
+  return { skills, experiences: [...experiences.values()] };
 }
 
 async function buildMatchMaps(report) {
@@ -364,9 +424,17 @@ async function buildMatchMaps(report) {
 
   ['strong', 'partial', 'gap'].forEach((sectionKey) => {
     extractItems(sections[sectionKey]).forEach((item) => {
-      const { type, label } = classifyItem(item, profile);
-      if (type === 'skill') buckets.skill[sectionKey].push(label);
-      else if (type === 'experience') buckets.experience[sectionKey].push(label);
+      const { skills, experiences } = classifyItem(item, profile);
+      skills.forEach(skill => uniquePush(buckets.skill[sectionKey], skill.name));
+      experiences.forEach(experience => {
+        uniquePush(buckets.experience[sectionKey], `${experience.title} — ${experience.company}`);
+      });
+
+      // Gaps can be requirements absent from the profile, so show their
+      // reported label even though there is no candidate skill to link.
+      if (sectionKey === 'gap' && skills.length === 0 && experiences.length === 0) {
+        uniquePush(buckets.skill.gap, itemLabel(item));
+      }
     });
   });
 

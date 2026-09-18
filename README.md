@@ -227,6 +227,10 @@ or expose host port 8000. Stop any locally running Uvicorn instance before
 using this Docker stack: both instances can access the same mounted `data/`
 and `index/` folders, and should not write to them concurrently.
 
+The frontend waits up to five and a half minutes for a local model response.
+This accommodates slower CPU/GPU inference while keeping the application-level
+five-minute model timeout as the final limit.
+
 Your private `data/`, `index/`, and `out/` folders are mounted from the
 project directory rather than copied into an image. Rebuilding or removing
 the containers therefore does not remove your profile, saved postings, RAG
@@ -260,6 +264,16 @@ folder, since the HTML references the other two by relative filename
 (`<link href="job-hunt-frontend.css">`, `<script src="job-hunt-frontend.js">`).
 Browsers load sibling files like this fine from a plain `file://` page, same
 as when it was one file.
+
+### Capture a posting from Microsoft Edge
+
+The included [Edge companion extension](edge-extension/README.md) adds a
+one-click extractor for the active job page. It copies a schema-compatible
+`JobPosting` JSON object, including the complete cleaned description in
+`raw_description`. Paste that JSON into the Match tab: the frontend imports
+and validates the structured record directly, so the local model can begin
+matching without running its separate parsing step. Ordinary text and URL
+pastes work exactly as before.
 
 **Important:** this only works when the HTML file is opened directly in
 your own browser. If you're viewing it inside Claude's chat preview instead,

@@ -22,8 +22,9 @@ SYSTEM_PROMPT = (
     "the same words as the job posting. Use ONLY the provided candidate "
     "facts. Be honest and specific — do not soften real gaps, and do not "
     "invent matches that aren't supported by the facts. Structure your "
-    "answer with three headed sections: 'Strong matches', 'Partial "
-    "matches', and 'Gaps'. "
+    "answer with these exact headed sections: 'Strong matches', 'Moderate "
+    "matches', 'Weak or no matches', and 'Conclusion'. Make each match a "
+    "bullet beginning with the relevant candidate skill, project, or role. "
     "After those three sections, add one final line, exactly in this format "
     "and nothing else on that line: 'Confidence: NN' — where NN is a whole "
     "number from 0 to 100 representing your honest estimate of how strong "
@@ -32,18 +33,25 @@ SYSTEM_PROMPT = (
     "that line."
 )
 
-_CONFIDENCE_PATTERN = re.compile(r"confidence:\s*(\d{1,3})", re.IGNORECASE)
-DEFAULT_CONFIDENCE_WHEN_UNPARSEABLE = 100  # fail open so a parsing miss never blocks the pipeline
+_CONFIDENCE_PATTERN = re.compile(
+    r"(?im)^\s*(?:\*\*)?confidence(?:\s+score)?(?:\*\*)?\s*:\s*"
+    r"(\d{1,3})(?:\s*(?:/\s*100|%))?\s*$"
+)
 
 
-def _parse_confidence(text: str) -> tuple[str, int, bool]:
+def _parse_confidence(text: str) -> tuple[str, int | None, bool]:
     """Pull the trailing 'Confidence: NN' line out of the report.
 
     Returns (report_without_confidence_line, confidence_0_to_100, was_detected).
+
+    A missing or malformed score is deliberately returned as ``None``. The
+    old fail-open value of 100 made a format miss look like a perfect match,
+    which could save and prioritize weak roles incorrectly.
     """
-    match = _CONFIDENCE_PATTERN.search(text)
-    if not match:
-        return text.strip(), DEFAULT_CONFIDENCE_WHEN_UNPARSEABLE, False
+    matches = list(_CONFIDENCE_PATTERN.finditer(text))
+    if not matches:
+        return text.strip(), None, False
+    match = matches[-1]
     confidence = max(0, min(100, int(match.group(1))))
     cleaned = _CONFIDENCE_PATTERN.sub("", text).strip()
     return cleaned, confidence, True

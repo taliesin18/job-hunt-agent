@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import config
-from .orchestrator import run_matching, CONFIDENCE_THRESHOLD
+from .orchestrator import run_matching, run_matching_parsed, CONFIDENCE_THRESHOLD
 from .agents.matcher import match_job
 from .agents.resume_fixer import fix_resume
 from .agents.cover_letter import write_cover_letter
@@ -39,7 +39,8 @@ app.add_middleware(
 
 class MatchRequest(BaseModel):
     job_source: str | None = None  # raw pasted job description text, or a URL
-    job: dict | None = None        # OR an already-parsed job (skips the fetcher LLM call)
+    job: dict | None = None        # an already-parsed or saved job
+    save_job: bool = False         # true for a newly imported structured posting
 
 
 class ResumeRequest(BaseModel):
@@ -79,9 +80,9 @@ def health():
 @app.post("/api/match")
 def match(req: MatchRequest):
     """
-    Either parses a job (req.job_source: text or URL) and matches it, or
-    re-matches an already-parsed job (req.job — e.g. one picked from
-    /api/job-postings) without spending an extra LLM call re-parsing it.
+    Either parses a job (req.job_source: text or URL), imports a structured
+    job (req.job with save_job=true), or re-matches an existing saved job
+    (req.job with save_job=false) without spending an extra LLM call.
 
     Returns job, match_report, confidence, confidence_detected,
     below_threshold, confidence_threshold — the frontend decides how to
@@ -91,15 +92,21 @@ def match(req: MatchRequest):
     """
     try:
         if req.job:
-            match_result = match_job(req.job)
-            result = {
-                "job": req.job,
-                "match_report": match_result["report"],
-                "confidence": match_result["confidence"],
-                "confidence_detected": match_result["confidence_detected"],
-                "below_threshold": match_result["confidence"] < CONFIDENCE_THRESHOLD,
-                "saved": True,  # re-matching a job that came from /api/job-postings — already saved
-            }
+            if req.save_job:
+                result = run_matching_parsed(req.job)
+            else:
+                match_result = match_job(req.job)
+                result = {
+                    "job": req.job,
+                    "match_report": match_result["report"],
+                    "confidence": match_result["confidence"],
+                    "confidence_detected": match_result["confidence_detected"],
+                    "below_threshold": (
+                        match_result["confidence"] is None
+                        or match_result["confidence"] < CONFIDENCE_THRESHOLD
+                    ),
+                    "saved": True,  # re-matching a job from /api/job-postings
+                }
         elif req.job_source:
             result = run_matching(req.job_source)
         else:
@@ -211,8 +218,22 @@ def profile_data():
     skills = load_entities("skill", config.ENTITY_FILES["skill"])
     experience = load_entities("experience", config.ENTITY_FILES["experience"])
     return {
-        "skills": [{"id": s["id"], "name": s["name"]} for s in skills],
+        "skills": [
+            {
+                "id": s["id"],
+                "name": s["name"],
+                "related_experience_ids": s.get("related_experience_ids", []),
+            }
+            for s in skills
+        ],
         "experience": [
-            {"id": e["id"], "title": e["title"], "company": e["company"]} for e in experience
+            {
+                "id": e["id"],
+                "title": e["title"],
+                "company": e["company"],
+                "skills_used": e.get("skills_used", []),
+                "tags": e.get("tags", []),
+            }
+            for e in experience
         ],
     }

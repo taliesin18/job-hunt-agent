@@ -105,6 +105,20 @@ class JobPosting(BaseModel):
     date_saved: Optional[str] = None
     raw_description: str
     required_skills: List[str] = Field(default_factory=list)
+    # Optional source facts captured by the companion browser extension.
+    # The raw description remains the source of truth for matching, but keeping
+    # these fields makes a saved posting easier to inspect and reuse later.
+    location: Optional[str] = None
+    employment_type: Optional[str] = None
+    seniority: Optional[str] = None
+    compensation: Optional[str] = None
+    application_deadline: Optional[str] = None
+    responsibilities: List[str] = Field(default_factory=list)
+    qualifications: List[str] = Field(default_factory=list)
+    preferred_skills: List[str] = Field(default_factory=list)
+    benefits: List[str] = Field(default_factory=list)
+    application_instructions: List[str] = Field(default_factory=list)
+    captured_at: Optional[str] = None
     # Kanban board status. Free string (not a strict enum) so the UI's
     # column set can change without a schema migration; the board's
     # current columns are: saved, application_sent, initial_interview,

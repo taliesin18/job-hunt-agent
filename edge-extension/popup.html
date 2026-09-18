@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Job Hunt Extractor</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <h1>Job Hunt Extractor</h1>
+      <p id="status" role="status">Open a job posting, then extract it.</p>
+      <button id="extract" type="button">Extract current job</button>
+      <section id="result" hidden>
+        <p id="summary"></p>
+        <label for="record">Paste this JSON into the Job Hunt Agent</label>
+        <textarea id="record" readonly spellcheck="false"></textarea>
+        <div class="actions">
+          <button id="copy" type="button">Copy JSON</button>
+          <button id="openApp" class="secondary" type="button">Open Job Hunt Agent</button>
+        </div>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

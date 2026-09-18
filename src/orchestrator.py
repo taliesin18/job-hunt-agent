@@ -43,27 +43,22 @@ from .agents.fetcher import parse_job_posting
 from .agents.matcher import match_job
 from .agents.resume_fixer import fix_resume
 from .agents.cover_letter import write_cover_letter
+from .schemas import JobPosting
 
 CONFIDENCE_THRESHOLD = 50
 
 
-def run_matching(source: str, save_job: bool = True) -> dict:
-    """
-    source: raw job description text OR a URL to fetch it from.
-
-    Fetches/parses the job and runs the matcher first, THEN saves to
-    data/job_postings/ only if save_job is True and the match confidence
-    meets CONFIDENCE_THRESHOLD — see module docstring. Returns:
-        job, match_report, confidence, confidence_detected,
-        below_threshold, saved
-    """
-    job = parse_job_posting(source)
+def _match_and_maybe_save(job: dict, save_job: bool = True) -> dict:
+    """Match a normalized posting, saving only when it clears the threshold."""
     match_result = match_job(job)
-    below_threshold = match_result["confidence"] < CONFIDENCE_THRESHOLD
+    confidence = match_result["confidence"]
+    # A missing score is not evidence of a good fit. Do not save or
+    # automatically prioritize a posting until the model provides one.
+    below_threshold = confidence is None or confidence < CONFIDENCE_THRESHOLD
 
     saved = False
     if save_job and not below_threshold:
-        job["last_match_confidence"] = match_result["confidence"]
+        job["last_match_confidence"] = confidence
         config.JOB_POSTINGS_DIR.mkdir(parents=True, exist_ok=True)
         out_path = config.JOB_POSTINGS_DIR / f"{job['id']}.json"
         out_path.write_text(json.dumps(job, indent=2), encoding="utf-8")
@@ -77,6 +72,34 @@ def run_matching(source: str, save_job: bool = True) -> dict:
         "below_threshold": below_threshold,
         "saved": saved,
     }
+
+
+def run_matching(source: str, save_job: bool = True) -> dict:
+    """
+    source: raw job description text OR a URL to fetch it from.
+
+    Fetches/parses the job and runs the matcher first, THEN saves to
+    data/job_postings/ only if save_job is True and the match confidence
+    meets CONFIDENCE_THRESHOLD — see module docstring. Returns:
+        job, match_report, confidence, confidence_detected,
+        below_threshold, saved
+    """
+    return _match_and_maybe_save(parse_job_posting(source), save_job=save_job)
+
+
+def run_matching_parsed(job: dict, save_job: bool = True) -> dict:
+    """Match a structured JobPosting payload captured outside the application.
+
+    The browser extension supplies this form. Validate and normalize it before
+    use so downstream agents always receive the same shape as postings parsed
+    from raw text. This avoids a second local-LLM extraction pass while the
+    original description is still retained in ``raw_description``.
+    """
+    try:
+        normalized_job = JobPosting.model_validate(job).model_dump()
+    except Exception as e:
+        raise ValueError(f"Invalid structured job posting: {e}") from e
+    return _match_and_maybe_save(normalized_job, save_job=save_job)
 
 
 def generate_resume_and_cover_letter(
