@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Local Job-Hunt RAG Agent
 
 Fully local, zero-cost RAG agent over your own career data. See
@@ -152,9 +151,57 @@ weak fit. Pass `--confidence-skip` to be asked anyway.
 ## 6. Local API + browser frontend
 
 For a GUI instead of the CLI, there's a small FastAPI wrapper (`src/api.py`)
-and a standalone HTML frontend (`job-hunt-frontend.html`) that calls it.
-No logic is reimplemented — every endpoint just calls a function the CLI
-already uses.
+and a browser frontend that calls it. No logic is reimplemented — every
+endpoint just calls a function the CLI already uses.
+
+**Frontend files** — split by concern so each is easy to edit on its own:
+- `job-hunt-frontend.html` — structure/markup only
+- `job-hunt-frontend.css` — all styling (the glass theme, light/dark tokens)
+- `job-hunt-frontend.js` — all behavior (tab switching, API calls, the
+  match-map charts, the markdown renderer)
+
+**Color palettes.** A dropdown in the header (next to the light/dark toggle)
+switches between three glass palettes, each with its own light and dark
+variant:
+- **Aurora** (default) — indigo/pink/green/blue pastel gradient
+- **Noir Green** — black/gray/green
+- **Cyber Teal** — teal/gray/black
+
+Every palette's muted text color was chosen by actually computing WCAG
+contrast ratios against the translucent panel composited over each gradient
+stop (not just eyeballing it) — worst case across all three palettes and
+both light/dark modes is 5.02:1, comfortably above the 4.5:1 minimum for
+body text. The original Aurora palette's `--fg-muted` was corrected the same
+way after review — it was measured at 3.30:1 in dark mode in one gradient
+position, a real WCAG 1.4.3 failure, not just a theoretical one.
+
+**Accessibility.** The Kanban board, modal, and tab navigation were rebuilt
+for keyboard and screen-reader use, following an accessibility review:
+- Kanban cards are keyboard-focusable (`tabindex`, `role="button"`,
+  Enter/Space to open) and each also has its own status `<select>` — a
+  non-drag way to change status, needed both for keyboard users and anyone
+  who finds dragging error-prone (WCAG 2.5.7).
+- The job detail modal traps Tab within itself while open, moves focus in
+  on open and back to the triggering card on close, and closes on Escape
+  (`role="dialog"`, `aria-modal="true"`).
+- Tabs use the real ARIA tabs pattern (`role="tablist"/"tab"/"tabpanel"`,
+  `aria-selected`), and switching tabs moves focus to the new panel's
+  heading so a screen reader announces the change.
+- Status/error messages are in `aria-live="polite"` regions, with
+  `role="alert"` added specifically for errors.
+- `jobInput`, `askInput`, `apiUrlInput`, and `askType` all have real
+  (visually-hidden where not wanted visibly) `<label>`s instead of relying
+  on placeholder text alone.
+- The two match-map scatter charts have distinct `aria-label`s (previously
+  one generic label shared by both) plus a visually-hidden data table
+  listing the same strong/partial/gap items the dots represent, since a
+  hover-only `<title>` reaches mouse users only.
+
+Not fully covered: color contrast could only be verified by computing exact
+composite colors mathematically (see above), not by rendering — if you
+customize a palette's gradient or panel opacity, re-check contrast rather
+than assuming it still passes. Touch target sizes look fine from the CSS
+but weren't confirmed against a live render either.
 
 **Run the API:**
 
@@ -163,14 +210,19 @@ uvicorn src.api:app --reload --port 8000
 ```
 
 **Open the frontend:** double-click `job-hunt-frontend.html` to open it in
-your browser (or drag it into a browser window). It's a single self-contained
-file — no build step, no server needed for the frontend itself.
+your browser (or drag it into a browser window). No build step, no server
+needed for the frontend itself — but keep all three files in the same
+folder, since the HTML references the other two by relative filename
+(`<link href="job-hunt-frontend.css">`, `<script src="job-hunt-frontend.js">`).
+Browsers load sibling files like this fine from a plain `file://` page, same
+as when it was one file.
 
 **Important:** this only works when the HTML file is opened directly in
 your own browser. If you're viewing it inside Claude's chat preview instead,
 the fetch calls will fail — Claude's sandboxed preview (and browsers in
 general) block a hosted page from reaching into your local network. Download
-the file and open it as a local file for the live functionality.
+all three files (not just the HTML) and open the HTML as a local file for
+the live functionality.
 
 **Layout:** a glass UI (frosted translucent panels over a soft gradient
 background) with a light/dark toggle (top right — follows your system
@@ -191,13 +243,29 @@ control rather than one linear flow — jump to whichever you need:
   come with a "Copy" button and an optional "Show retrieved context" toggle
   so you can sanity-check what it was grounded in before pasting an answer
   somewhere.
-- **Job postings** — every job you've matched before (`data/job_postings/`),
-  newest first. Clicking "Match" on one re-runs the matcher without
-  re-parsing it through the fetcher agent again (it's already structured),
-  and jumps you to the Match tab with the result.
+- **Job postings** — a Kanban board, one column per status: Saved,
+  Application Sent / Waiting, Initial Interview, Rejected, Failed. A job
+  only lands here at all if its match confidence meets the threshold (50 by
+  default) — a weak match is reported on the Match tab but never saved to
+  `data/job_postings/`, so this board only fills with roles worth tracking.
+  Drag a card to a different column to update its status (persisted
+  immediately via `PATCH /api/job-postings/{id}`), or click a card to open
+  its detail view: the generated resume and cover letter for that job (if
+  you've generated them — see below), a status dropdown as an alternative
+  to dragging, and a button to jump back to the Match tab and re-match it
+  without re-parsing (it's already structured).
 - **Knowledge base** — indexed entity counts and a "Re-index now" button.
   This only affects the Ask tab's retrieval — Match/resume/cover-letter read
   `data/*.json` directly and don't need indexing at all.
+
+**Generated resume/cover letter persistence.** When you click "Generate
+resume" or "Generate cover letter" on the Match tab for a job that was
+saved (high enough confidence), the result is automatically written onto
+that job's JSON file (`resume_text` / `cover_letter_text` fields) via a
+`PATCH` call — that's what the Job Postings board's card modal shows when
+you open a ticket later. For a match that wasn't saved (below threshold),
+generation still works, but nothing is persisted — there's no saved record
+to attach it to.
 
 **Match maps — a real limitation worth knowing.** `/api/match` only returns
 prose (the matcher's "Strong matches / Partial matches / Gaps" write-up) —
@@ -311,7 +379,3 @@ the more robust choice; use docx if you need things Excel can't easily do
 - Every agent is instructed to only use the facts in your `data/` files and
   never invent achievements or metrics — but always review generated
   resume/cover letter text yourself before sending it anywhere.
-=======
-# RAG-JobHuntAI
-Fully local, zero-cost RAG agent over your own career data using local LLM Models.
->>>>>>> 3f251b34b293a009d49a23b2d49302628534e892
