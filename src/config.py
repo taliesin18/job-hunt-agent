@@ -2,6 +2,7 @@
 Central configuration for the local job-hunt RAG agent.
 Everything here is local / free — no API keys required.
 """
+import os
 from pathlib import Path
 
 # --- Project layout -----------------------------------------------------
@@ -13,7 +14,10 @@ CHROMA_DIR = INDEX_DIR / "chroma_db"
 MANIFEST_DB_PATH = INDEX_DIR / "manifest.sqlite"
 
 # --- Ollama ---------------------------------------------------------------
-OLLAMA_HOST = "http://localhost:11434"
+# The local default keeps the existing non-Docker workflow unchanged. Docker
+# Compose overrides this with host.docker.internal so the API container can
+# reach Ollama running on the Windows host.
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 GEN_MODEL = "qwen3:8b"          # `ollama pull qwen3:8b`
 EMBED_MODEL = "nomic-embed-text"   # `ollama pull nomic-embed-text`
 

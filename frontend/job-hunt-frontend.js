@@ -40,12 +40,20 @@ function switchTab(name) {
 }
 
 /* ---------------- shared helpers ---------------- */
-let apiBase = document.getElementById('apiUrlInput').value.replace(/\/$/, '');
+const apiUrlInput = document.getElementById('apiUrlInput');
+// Opening the files directly uses the original local API. When the dashboard
+// is served by Docker, use nginx's same-origin /api proxy so the API
+// container never needs to expose a host port.
+const defaultApiBase = window.location.protocol === 'file:'
+  ? apiUrlInput.dataset.fileApiUrl
+  : window.location.origin;
+apiUrlInput.value = defaultApiBase;
+let apiBase = apiUrlInput.value.replace(/\/$/, '');
 let currentJob = null;
 let currentMatchReport = '';
 let currentJobSaved = false; // whether currentJob exists in data/job_postings/ — decided by match confidence
 
-document.getElementById('apiUrlInput').addEventListener('change', (e) => {
+apiUrlInput.addEventListener('change', (e) => {
   apiBase = e.target.value.replace(/\/$/, '');
   checkHealth();
 });

@@ -209,6 +209,50 @@ but weren't confirmed against a live render either.
 uvicorn src.api:app --reload --port 8000
 ```
 
+### Run with Docker Desktop
+
+Docker Desktop can run the API and browser frontend together, without
+activating the Python virtual environment. This first containerized setup
+continues to use Ollama installed on your Windows host, so start Ollama and
+make sure the configured models are already available before starting the
+stack.
+
+```bash
+docker compose up --build -d
+```
+
+Then open [http://localhost:8080](http://localhost:8080). The dashboard
+proxies its API calls privately to the API container, so Docker does not use
+or expose host port 8000. Stop any locally running Uvicorn instance before
+using this Docker stack: both instances can access the same mounted `data/`
+and `index/` folders, and should not write to them concurrently.
+
+Your private `data/`, `index/`, and `out/` folders are mounted from the
+project directory rather than copied into an image. Rebuilding or removing
+the containers therefore does not remove your profile, saved postings, RAG
+index, or generated materials.
+
+Useful commands:
+
+```bash
+# See API startup errors or Ollama connection failures
+docker compose logs --follow job-hunt-api
+
+# Stop the containers; your mounted data remains intact
+docker compose down
+```
+
+By default the Docker API uses `http://host.docker.internal:11434` to reach
+Ollama on the Windows host. If you later host Ollama elsewhere, create an
+uncommitted `.env` file beside `compose.yaml` with, for example:
+
+```bash
+OLLAMA_HOST=http://your-ollama-host:11434
+```
+
+The usual local development command above remains supported: outside Docker,
+the API still defaults to `http://localhost:11434` for Ollama.
+
 **Open the frontend:** double-click `job-hunt-frontend.html` to open it in
 your browser (or drag it into a browser window). No build step, no server
 needed for the frontend itself — but keep all three files in the same

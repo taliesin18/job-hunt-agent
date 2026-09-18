@@ -1,0 +1,103 @@
+# ==========================================
+# Python
+# ==========================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python packaging
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ==========================================
+# Environment / Local Configuration
+# ==========================================
+
+.env
+.env.*
+!.env.example
+
+# Local configuration
+config.local.*
+settings.local.*
+*.local.json
+
+# ==========================================
+# Personal / Local Data
+# ==========================================
+
+data/
+
+# Keep the directory structure if desired
+# by adding a .gitkeep file manually.
+
+# ==========================================
+# RAG / Vector Database
+# ==========================================
+
+index/
+chroma_db/
+*.sqlite
+*.sqlite3
+*.db
+
+# ==========================================
+# Generated Output
+# ==========================================
+
+out/
+Cabiliza_Resume_Template.xlsx
+tailored_resume.csv
+
+# ==========================================
+# Temporary / Backup Files
+# ==========================================
+
+*.bak
+*.tmp
+*.temp
+*~
+
+# ==========================================
+# IDE / Editor
+# ==========================================
+
+.vscode/
+.idea/
+*.iml
+
+# ==========================================
+# OS Files
+# ==========================================
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==========================================
+# Logs
+# ==========================================
+
+*.log
+logs/
+
+# Local Docker launch shortcuts
+Start-JobHunt.ps1
+Stop-JobHunt.ps1
+Get-JobHuntStatus.ps1
+
+# ==========================================
+# Local AI / Model Artifacts
+# ==========================================
+job-hunt-rag-agent-spec.md
+models/
+*.gguf
