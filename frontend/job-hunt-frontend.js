@@ -11,12 +11,30 @@ function toggleTheme() {
 }
 applyTheme(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 
+function applyPalette(palette) {
+  document.documentElement.setAttribute('data-palette', palette);
+}
+applyPalette('aurora');
+
 /* ---------------- tabs ---------------- */
 function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-' + name).classList.add('active');
-  document.querySelector(`.tab-btn[data-tab="${name}"]`).classList.add('active');
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.remove('active');
+    b.setAttribute('aria-selected', 'false');
+  });
+
+  const panel = document.getElementById('tab-' + name);
+  const btn = document.querySelector(`.tab-btn[data-tab="${name}"]`);
+  panel.classList.add('active');
+  btn.classList.add('active');
+  btn.setAttribute('aria-selected', 'true');
+
+  // Move focus to the panel's heading so screen reader users get an
+  // announcement that the section changed, not just a silent DOM swap.
+  const heading = panel.querySelector('h2');
+  if (heading) heading.focus();
+
   if (name === 'jobs') loadJobPostings();
   if (name === 'kb') loadStatus();
 }
@@ -37,6 +55,15 @@ function setMsg(id, text, kind) {
   el.textContent = text;
   el.className = 'inline-msg' + (kind ? ' ' + kind : '');
   el.classList.toggle('hidden', !text);
+  // aria-live="polite" is set in the HTML for all of these; for errors we
+  // additionally set role="alert", which implies assertive announcement —
+  // a screen reader user shouldn't have to be already focused on this
+  // element to hear that something went wrong.
+  if (kind === 'error') {
+    el.setAttribute('role', 'alert');
+  } else {
+    el.removeAttribute('role');
+  }
 }
 
 function friendlyError(e) {
@@ -77,14 +104,18 @@ setInterval(checkHealth, 10000);
 
 /* ---------------- Match tab ---------------- */
 async function findMatch() {
-  const source = document.getElementById('jobInput').value.trim();
+  const jobInputEl = document.getElementById('jobInput');
+  const source = jobInputEl.value.trim();
   if (!source) {
     setMsg('matchMsg', 'Paste a job description or URL first.', 'error');
+    jobInputEl.setAttribute('aria-invalid', 'true');
     return;
   }
+  jobInputEl.removeAttribute('aria-invalid');
   const btn = document.getElementById('matchBtn');
   btn.disabled = true;
   btn.textContent = 'Finding match…';
+  setMatchLoading();
   setMsg('matchMsg', 'Looking for a match — this can take a little while on local hardware…', 'loading');
 
   try {
@@ -111,6 +142,7 @@ async function matchSavedJob(job) {
   const btn = document.getElementById('matchBtn');
   btn.disabled = true;
   btn.textContent = 'Finding match…';
+  setMatchLoading();
   setMsg('matchMsg', 'Re-matching this saved posting…', 'loading');
   try {
     const data = await apiFetch('/api/match', {
@@ -130,11 +162,23 @@ async function matchSavedJob(job) {
   }
 }
 
+function setMatchLoading() {
+  const section = document.getElementById('matchSection');
+  const report = document.getElementById('reportText');
+  section.classList.remove('hidden');
+  report.classList.add('is-loading');
+  report.setAttribute('aria-live', 'polite');
+  report.innerHTML = '<span class="match-loader" aria-label="Finding match"></span>';
+}
+
 function renderMatch(data) {
   document.getElementById('matchSection').classList.remove('hidden');
   document.getElementById('jobTitle').textContent = data.job.title || 'Untitled role';
   document.getElementById('jobCompany').textContent = data.job.company || 'Unknown company';
-  document.getElementById('reportText').textContent = data.match_report;
+  const report = document.getElementById('reportText');
+  report.classList.remove('is-loading');
+  report.removeAttribute('aria-live');
+  report.textContent = data.match_report;
   currentJobSaved = !!data.saved;
 
   const badge = document.getElementById('confidenceBadge');
@@ -318,15 +362,15 @@ async function buildMatchMaps(report) {
     });
   });
 
-  renderScatterChart('skillsMap', buckets.skill);
-  renderScatterChart('experienceMap', buckets.experience);
+  renderScatterChart('skillsMap', buckets.skill, 'Skills match map');
+  renderScatterChart('experienceMap', buckets.experience, 'Experience match map');
 }
 
 function escapeXml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function renderScatterChart(containerId, itemsBySection) {
+function renderScatterChart(containerId, itemsBySection, chartLabel) {
   const width = 420, height = 190, bandWidth = width / 3;
   const columns = [
     { key: 'strong', label: 'Strong', color: '#16a34a', x0: 0 },
@@ -334,7 +378,7 @@ function renderScatterChart(containerId, itemsBySection) {
     { key: 'gap', label: 'Gaps', color: '#dc2626', x0: bandWidth * 2 },
   ];
   let total = 0;
-  let svg = `<svg viewBox="0 0 ${width} ${height + 26}" role="img" aria-label="Match map scatter chart">`;
+  let svg = `<svg viewBox="0 0 ${width} ${height + 26}" role="img" aria-label="${escapeXml(chartLabel)}">`;
   columns.forEach((col) => {
     const items = itemsBySection[col.key] || [];
     total += items.length;
@@ -352,12 +396,26 @@ function renderScatterChart(containerId, itemsBySection) {
     });
   });
   svg += `</svg>`;
+
   const container = document.getElementById(containerId);
   if (total === 0) {
     container.innerHTML = '<p class="map-caption">No clearly categorized items found in the report for this map.</p>';
-  } else {
-    container.innerHTML = svg;
+    return;
   }
+
+  // The SVG's dots are only reachable by hovering, which excludes screen
+  // reader and motor-impaired users entirely — this table carries the
+  // same strong/partial/gap categorization as real, non-visual content.
+  let table = `<table class="sr-only"><caption>${escapeXml(chartLabel)}</caption><thead><tr><th>Category</th><th>Item</th></tr></thead><tbody>`;
+  columns.forEach((col) => {
+    const items = itemsBySection[col.key] || [];
+    items.forEach((label) => {
+      table += `<tr><td>${escapeXml(col.label)}</td><td>${escapeXml(label)}</td></tr>`;
+    });
+  });
+  table += `</tbody></table>`;
+
+  container.innerHTML = svg + table;
 }
 
 // Deterministic pseudo-random in [0,1) from a string seed, so re-rendering
@@ -429,11 +487,14 @@ function markdownToHtml(text) {
 }
 
 async function askQuestion() {
-  const query = document.getElementById('askInput').value.trim();
+  const askInputEl = document.getElementById('askInput');
+  const query = askInputEl.value.trim();
   if (!query) {
     setMsg('askMsg', 'Type or paste a question first.', 'error');
+    askInputEl.setAttribute('aria-invalid', 'true');
     return;
   }
+  askInputEl.removeAttribute('aria-invalid');
   const entityType = document.getElementById('askType').value || null;
   const btn = document.getElementById('askBtn');
   btn.disabled = true;
@@ -504,6 +565,38 @@ function normalizeStatus(status) {
   return KANBAN_STATUS_KEYS.includes(status) ? status : 'saved';
 }
 
+function statusLabel(key) {
+  const found = KANBAN_STATUSES.find(s => s.key === key);
+  return found ? found.label : key;
+}
+
+async function updateJobStatus(jobId, newStatus) {
+  const job = jobPostingsCache.find(j => j.id === jobId);
+  if (!job || normalizeStatus(job.status) === newStatus) return;
+
+  const previousStatus = job.status;
+  job.status = newStatus; // optimistic UI update
+  renderKanbanBoard(jobPostingsCache);
+  if (currentModalJobId === jobId) {
+    document.getElementById('modalStatusSelect').value = newStatus;
+  }
+
+  try {
+    await apiFetch(`/api/job-postings/${encodeURIComponent(jobId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus }),
+    });
+  } catch (err) {
+    job.status = previousStatus; // roll back on failure
+    renderKanbanBoard(jobPostingsCache);
+    if (currentModalJobId === jobId) {
+      document.getElementById('modalStatusSelect').value = normalizeStatus(previousStatus);
+    }
+    setMsg('jobsMsg', friendlyError(err), 'error');
+  }
+}
+
 async function loadJobPostings() {
   setMsg('jobsMsg', 'Loading…', 'loading');
   try {
@@ -570,9 +663,17 @@ function buildKanbanCard(job) {
   card.className = 'kanban-card';
   card.draggable = true;
   card.dataset.jobId = job.id;
+  card.tabIndex = 0;
+  card.setAttribute('role', 'button');
 
   const conf = job.last_match_confidence;
   const confClass = conf == null ? '' : (conf >= 70 ? 'good' : conf >= 50 ? 'mid' : 'low');
+  const statusLbl = statusLabel(normalizeStatus(job.status));
+
+  card.setAttribute('aria-label',
+    `${job.title || 'Untitled role'} at ${job.company || 'Unknown company'}, status: ${statusLbl}` +
+    (conf != null ? `, match confidence ${conf} of 100` : '') +
+    '. Press Enter to view details.');
 
   card.innerHTML = `
     <div class="title"></div>
@@ -593,13 +694,38 @@ function buildKanbanCard(job) {
     badge.classList.add(confClass);
   }
 
+  // Per-card status control: a real, always-reachable alternative to
+  // dragging — needed for keyboard users, and for anyone who finds drag
+  // interactions error-prone (WCAG 2.5.7 requires a non-drag path; the
+  // modal's dropdown alone doesn't count if the card itself can't be
+  // reached without a mouse).
+  const statusSelect = document.createElement('select');
+  statusSelect.className = 'kanban-card-status';
+  statusSelect.setAttribute('aria-label', `Change status for ${job.title || 'this job'}`);
+  statusSelect.innerHTML = KANBAN_STATUSES.map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+  statusSelect.value = normalizeStatus(job.status);
+  statusSelect.addEventListener('click', (e) => e.stopPropagation());
+  statusSelect.addEventListener('keydown', (e) => e.stopPropagation());
+  statusSelect.addEventListener('change', (e) => {
+    e.stopPropagation();
+    updateJobStatus(job.id, statusSelect.value);
+  });
+  card.appendChild(statusSelect);
+
   card.addEventListener('dragstart', (e) => {
     card.classList.add('dragging');
     e.dataTransfer.setData('text/plain', job.id);
     e.dataTransfer.effectAllowed = 'move';
   });
   card.addEventListener('dragend', () => card.classList.remove('dragging'));
-  card.addEventListener('click', () => openJobModal(job.id));
+  card.addEventListener('click', () => openJobModal(job.id, card));
+  card.addEventListener('keydown', (e) => {
+    if (e.target !== card) return; // let the status select handle its own keys
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      openJobModal(job.id, card);
+    }
+  });
 
   return card;
 }
@@ -617,31 +743,23 @@ async function onColumnDrop(e) {
   const column = e.currentTarget;
   column.classList.remove('drag-over');
   const jobId = e.dataTransfer.getData('text/plain');
-  const newStatus = column.dataset.status;
-  const job = jobPostingsCache.find(j => j.id === jobId);
-  if (!job || normalizeStatus(job.status) === newStatus) return;
-
-  const previousStatus = job.status;
-  job.status = newStatus; // optimistic UI update
-  renderKanbanBoard(jobPostingsCache);
-
-  try {
-    await apiFetch(`/api/job-postings/${encodeURIComponent(jobId)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus }),
-    });
-  } catch (err) {
-    job.status = previousStatus; // roll back on failure
-    renderKanbanBoard(jobPostingsCache);
-    setMsg('jobsMsg', friendlyError(err), 'error');
-  }
+  await updateJobStatus(jobId, column.dataset.status);
 }
 
-function openJobModal(jobId) {
+let modalTriggerElement = null;
+let modalKeydownHandler = null;
+
+function getFocusableInModal() {
+  const modal = document.getElementById('jobModal');
+  const selector = 'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
+  return Array.from(modal.querySelectorAll(selector)).filter(el => !el.disabled);
+}
+
+function openJobModal(jobId, triggerEl) {
   const job = jobPostingsCache.find(j => j.id === jobId);
   if (!job) return;
   currentModalJobId = jobId;
+  modalTriggerElement = triggerEl || document.activeElement;
 
   document.getElementById('modalJobTitle').textContent = job.title || 'Untitled role';
   document.getElementById('modalJobCompany').textContent = job.company || 'Unknown company';
@@ -654,6 +772,33 @@ function openJobModal(jobId) {
   fillModalTextField('modalCoverText', 'modalCoverActions', job.cover_letter_text);
 
   document.getElementById('jobModalBackdrop').classList.remove('hidden');
+
+  // Focus management: move focus into the dialog (2.4.3 Focus Order),
+  // trap Tab within it while open, and close on Escape — all required
+  // for a modal to be usable by keyboard/screen reader users at all.
+  document.getElementById('modalJobTitle').focus();
+
+  modalKeydownHandler = (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeJobModal();
+      return;
+    }
+    if (e.key === 'Tab') {
+      const focusable = getFocusableInModal();
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  };
+  document.addEventListener('keydown', modalKeydownHandler);
 }
 
 function fillModalTextField(textId, actionsId, value) {
@@ -671,6 +816,16 @@ function fillModalTextField(textId, actionsId, value) {
 function closeJobModal() {
   document.getElementById('jobModalBackdrop').classList.add('hidden');
   currentModalJobId = null;
+  if (modalKeydownHandler) {
+    document.removeEventListener('keydown', modalKeydownHandler);
+    modalKeydownHandler = null;
+  }
+  // Return focus to whatever opened the modal — without this, a keyboard
+  // user's focus silently drops to the top of the page (2.4.3).
+  if (modalTriggerElement && typeof modalTriggerElement.focus === 'function') {
+    modalTriggerElement.focus();
+  }
+  modalTriggerElement = null;
 }
 
 function closeJobModalIfBackdrop(e) {
@@ -680,22 +835,7 @@ function closeJobModalIfBackdrop(e) {
 async function onModalStatusChange() {
   if (!currentModalJobId) return;
   const newStatus = document.getElementById('modalStatusSelect').value;
-  const job = jobPostingsCache.find(j => j.id === currentModalJobId);
-  const previousStatus = job ? job.status : null;
-  if (job) job.status = newStatus;
-
-  try {
-    await apiFetch(`/api/job-postings/${encodeURIComponent(currentModalJobId)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus }),
-    });
-    renderKanbanBoard(jobPostingsCache);
-  } catch (e) {
-    if (job) job.status = previousStatus;
-    document.getElementById('modalStatusSelect').value = normalizeStatus(previousStatus);
-    setMsg('jobsMsg', friendlyError(e), 'error');
-  }
+  await updateJobStatus(currentModalJobId, newStatus);
 }
 
 function goToMatchTabForModalJob() {

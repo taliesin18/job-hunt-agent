@@ -11,7 +11,7 @@
 
   <header class="topbar glass">
     <div class="brand">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="3" y1="12" x2="21" y2="12"/></svg>
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="3" y1="12" x2="21" y2="12"/></svg>
       <div>
         <h1>Job Hunt Agent</h1>
         <p>Local RAG assistant &middot; runs entirely on your machine</p>
@@ -19,43 +19,51 @@
     </div>
     <div class="topbar-right">
       <span class="status-pill">
-        <span class="dot off" id="statusDot"></span>
+        <span class="dot off" id="statusDot" aria-hidden="true"></span>
         <span id="statusText">Checking&hellip;</span>
       </span>
+      <label for="apiUrlInput" class="sr-only">API base URL</label>
       <input class="api-url" id="apiUrlInput" value="http://localhost:8000" spellcheck="false">
-      <button class="icon-btn" id="themeToggle" onclick="toggleTheme()" title="Toggle dark/light mode"></button>
+      <label for="paletteSelect" class="sr-only">Color palette</label>
+      <select id="paletteSelect" class="palette-select" onchange="applyPalette(this.value)">
+        <option value="aurora">Aurora</option>
+        <option value="noir-green">Noir Green</option>
+        <option value="cyber-teal">Cyber Teal</option>
+      </select>
+      <button class="icon-btn" id="themeToggle" onclick="toggleTheme()" title="Toggle dark/light mode" aria-label="Toggle dark/light mode"></button>
     </div>
   </header>
 
-  <nav class="tabs glass">
-    <button class="tab-btn active" data-tab="match" onclick="switchTab('match')">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+  <nav class="tabs glass" role="tablist" aria-label="Sections">
+    <button class="tab-btn active" id="tabbtn-match" role="tab" aria-selected="true" aria-controls="tab-match" data-tab="match" onclick="switchTab('match')">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       Match
     </button>
-    <button class="tab-btn" data-tab="ask" onclick="switchTab('ask')">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    <button class="tab-btn" id="tabbtn-ask" role="tab" aria-selected="false" aria-controls="tab-ask" data-tab="ask" onclick="switchTab('ask')">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       Ask
     </button>
-    <button class="tab-btn" data-tab="jobs" onclick="switchTab('jobs')">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+    <button class="tab-btn" id="tabbtn-jobs" role="tab" aria-selected="false" aria-controls="tab-jobs" data-tab="jobs" onclick="switchTab('jobs')">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
       Job postings
       <span class="count hidden" id="jobsCount">0</span>
     </button>
-    <button class="tab-btn" data-tab="kb" onclick="switchTab('kb')">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg>
+    <button class="tab-btn" id="tabbtn-kb" role="tab" aria-selected="false" aria-controls="tab-kb" data-tab="kb" onclick="switchTab('kb')">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg>
       Knowledge base
     </button>
   </nav>
 
   <!-- ===================== MATCH TAB ===================== -->
-  <section class="tab-panel active" id="tab-match">
-    <h2>Paste a job description</h2>
+  <section class="tab-panel active" id="tab-match" role="tabpanel" aria-labelledby="tabbtn-match">
+    <h2 tabindex="-1">Paste a job description</h2>
     <p class="subtext">Paste the full posting, or a URL to it — the fetcher agent extracts the structured fields.</p>
-    <textarea id="jobInput" placeholder="Paste the full job description here, or a URL to the posting&hellip;"></textarea>
+    <label for="jobInput" class="sr-only">Job description or URL</label>
+    <textarea id="jobInput" aria-describedby="matchMsg" placeholder="Paste the full job description here, or a URL to the posting&hellip;"></textarea>
     <div class="row-gap">
       <button class="btn primary" id="matchBtn" onclick="findMatch()">Find match</button>
     </div>
-    <div class="inline-msg hidden" id="matchMsg"></div>
+    <div class="inline-msg hidden" id="matchMsg" aria-live="polite"></div>
 
     <div id="matchSection" class="hidden">
       <div class="panel glass">
@@ -88,7 +96,7 @@
           <h3>Tailored resume</h3>
           <p class="desc">Revises your current resume in place for this job — same structure, tailored content.</p>
           <button class="btn row-gap" id="resumeBtn" onclick="generateResume()" disabled>Generate resume</button>
-          <div class="inline-msg hidden" id="resumeMsg"></div>
+          <div class="inline-msg hidden" id="resumeMsg" aria-live="polite"></div>
           <pre class="result-text hidden" id="resumeResult"></pre>
           <div class="result-actions hidden" id="resumeActions">
             <button class="btn small" onclick="copyResult('resumeResult', this)">Copy</button>
@@ -98,7 +106,7 @@
           <h3>Cover letter</h3>
           <p class="desc">A short, specific cover letter using the same complete history.</p>
           <button class="btn row-gap" id="coverBtn" onclick="generateCoverLetter()" disabled>Generate cover letter</button>
-          <div class="inline-msg hidden" id="coverMsg"></div>
+          <div class="inline-msg hidden" id="coverMsg" aria-live="polite"></div>
           <pre class="result-text hidden" id="coverResult"></pre>
           <div class="result-actions hidden" id="coverActions">
             <button class="btn small" onclick="copyResult('coverResult', this)">Copy</button>
@@ -109,16 +117,18 @@
   </section>
 
   <!-- ===================== ASK TAB ===================== -->
-  <section class="tab-panel" id="tab-ask">
-    <h2>Ask your career data</h2>
+  <section class="tab-panel" id="tab-ask" role="tabpanel" aria-labelledby="tabbtn-ask">
+    <h2 tabindex="-1">Ask your career data</h2>
     <p class="subtext">
       Answers questions from your own indexed skills/experience — handy for recruitment-page
       screening questions ("Describe your experience with X", "Why are you a fit for Y?") that
       you need a grounded, specific answer for on the spot. Not just simple lookups — free-form
       questions work too.
     </p>
-    <textarea id="askInput" class="ask-input" placeholder="Paste a screening question, or ask anything about your own history&hellip;"></textarea>
+    <label for="askInput" class="sr-only">Question</label>
+    <textarea id="askInput" class="ask-input" aria-describedby="askMsg" placeholder="Paste a screening question, or ask anything about your own history&hellip;"></textarea>
     <div class="row-gap" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <label for="askType" class="sr-only">Entity type filter</label>
       <select id="askType">
         <option value="">All types</option>
         <option value="skill">Skill</option>
@@ -129,7 +139,7 @@
       </select>
       <button class="btn primary" id="askBtn" onclick="askQuestion()">Ask</button>
     </div>
-    <div class="inline-msg hidden" id="askMsg"></div>
+    <div class="inline-msg hidden" id="askMsg" aria-live="polite"></div>
     <div class="panel glass hidden" id="askPanel">
       <div class="result-text no-border markdown-body" id="askAnswer"></div>
       <div class="result-actions">
@@ -141,23 +151,23 @@
   </section>
 
   <!-- ===================== JOB POSTINGS TAB ===================== -->
-  <section class="tab-panel" id="tab-jobs">
-    <h2>Job postings pipeline</h2>
-    <p class="subtext">Jobs matched at a high enough confidence to save. Drag a card between columns to update its status, or click one to view its generated resume/cover letter.</p>
+  <section class="tab-panel" id="tab-jobs" role="tabpanel" aria-labelledby="tabbtn-jobs">
+    <h2 tabindex="-1">Job postings pipeline</h2>
+    <p class="subtext">Jobs matched at a high enough confidence to save. Drag a card between columns, use its status dropdown, or open it (click or Enter/Space) to view its generated resume/cover letter.</p>
     <button class="btn" onclick="loadJobPostings()">Refresh</button>
-    <div class="inline-msg hidden" id="jobsMsg"></div>
-    <div class="kanban-board" id="kanbanBoard"></div>
+    <div class="inline-msg hidden" id="jobsMsg" aria-live="polite"></div>
+    <div class="kanban-board" id="kanbanBoard" role="region" aria-label="Job postings board"></div>
   </section>
 
   <!-- ===================== KNOWLEDGE BASE TAB ===================== -->
-  <section class="tab-panel" id="tab-kb">
-    <h2>Knowledge base</h2>
+  <section class="tab-panel" id="tab-kb" role="tabpanel" aria-labelledby="tabbtn-kb">
+    <h2 tabindex="-1">Knowledge base</h2>
     <p class="subtext">What's currently indexed for the Ask tab. Match/resume/cover-letter read your data files directly and don't need this.</p>
     <div class="stat-grid" id="statGrid"></div>
     <div class="row-gap">
       <button class="btn primary" id="ingestBtn" onclick="runIngest()">Re-index now</button>
     </div>
-    <div class="inline-msg hidden" id="kbMsg"></div>
+    <div class="inline-msg hidden" id="kbMsg" aria-live="polite"></div>
   </section>
 
   <div class="setup-note glass">
@@ -172,13 +182,13 @@
 </div>
 
 <div class="modal-backdrop hidden" id="jobModalBackdrop" onclick="closeJobModalIfBackdrop(event)">
-  <div class="modal glass">
+  <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="modalJobTitle" id="jobModal">
     <div class="modal-header">
       <div>
-        <h3 id="modalJobTitle"></h3>
+        <h3 id="modalJobTitle" tabindex="-1"></h3>
         <p class="company" id="modalJobCompany"></p>
       </div>
-      <button class="icon-btn" onclick="closeJobModal()" title="Close">&times;</button>
+      <button class="icon-btn" onclick="closeJobModal()" title="Close" aria-label="Close">&times;</button>
     </div>
     <div class="modal-body">
       <label class="modal-field-label" for="modalStatusSelect">Status</label>
